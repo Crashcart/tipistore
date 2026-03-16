@@ -1,0 +1,148 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Runtipi App Configuration Schema",
+  "description": "JSON Schema for validating Runtipi app config.json files",
+  "type": "object",
+  "required": ["id", "name", "tipiVersion", "port", "categories"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the app",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Display name for the app"
+    },
+    "short_desc": {
+      "type": "string",
+      "description": "Short description shown in app listings"
+    },
+    "description": {
+      "type": "string",
+      "description": "Long description of the app"
+    },
+    "author": {
+      "type": "string",
+      "description": "App developer/maintainer"
+    },
+    "tipiVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Runtipi format version (1 or 2)"
+    },
+    "version": {
+      "type": "string",
+      "description": "App version"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "Default exposed port"
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "App categories (ai, utilities, media, etc.)",
+      "minItems": 1
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Search tags for discoverability"
+    },
+    "available": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether the app is available for installation"
+    },
+    "exposable": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the app can be exposed to the internet"
+    },
+    "no_gui": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the app lacks a web interface"
+    },
+    "url_suffix": {
+      "type": "string",
+      "default": "/",
+      "description": "URL path suffix for accessing the app"
+    },
+    "source": {
+      "type": "string",
+      "format": "uri",
+      "description": "GitHub repository URL"
+    },
+    "website": {
+      "type": "string",
+      "format": "uri",
+      "description": "Project website URL"
+    },
+    "supported_architectures": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["amd64", "arm64", "armv7"]
+      },
+      "description": "Supported CPU architectures"
+    },
+    "form_fields": {
+      "type": "array",
+      "description": "Configuration form fields displayed to users",
+      "items": {
+        "type": "object",
+        "required": ["type", "label"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["text", "password", "number", "boolean", "select", "email"]
+          },
+          "label": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "env_variable": {
+            "type": "string"
+          },
+          "default": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "number" },
+              { "type": "boolean" }
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": { "type": "string" },
+                "value": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}
