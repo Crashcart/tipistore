@@ -29,6 +29,8 @@ DISK_WARN_PERCENT=90
 MOUNT_WAIT_MAX=60
 RESTART_ATTEMPTS=0
 RESTART_MAX_ATTEMPTS=3
+DAEMON_MODE=true
+FOREGROUND=false
 
 # Color codes for output
 RED='\033[0;31m'
@@ -53,12 +55,14 @@ Options:
     -M <path>        Downloads directory (optional, checks if mounted)
     -l <logfile>     Log file path (default: /var/log/qbittorrent-monitor.log)
     -w <percent>     Disk space warning threshold (default: 90%)
+    -f               Run in foreground mode (default: daemon mode)
     -h               Display this help message
 
 Examples:
-    $0 -i 5m
-    $0 -i 30m -d /mnt/qb-data -M /mnt/downloads
-    $0 -i 1h -d /data -w 85
+    $0 -i 5m                                              # Runs as daemon
+    $0 -i 30m -d /mnt/qb-data -M /mnt/downloads          # Runs as daemon
+    $0 -i 1h -d /data -w 85 -f                            # Runs in foreground
+    $0 -i 5m -l /custom/path/monitor.log
 
 EOF
 }
@@ -228,12 +232,20 @@ cleanup() {
     exit 0
 }
 
+daemonize() {
+    # Fork to background
+    "$0" "$@" > /dev/null 2>&1 &
+    local daemon_pid=$!
+    echo "Started qBittorrent monitor daemon (PID: $daemon_pid)"
+    exit 0
+}
+
 ##############################################################################
 # Main Script
 ##############################################################################
 
 # Parse command line arguments
-while getopts "i:U:p:d:M:l:w:h" opt; do
+while getopts "i:U:p:d:M:l:w:fh" opt; do
     case $opt in
         i)
             INTERVAL="$OPTARG"
@@ -256,6 +268,10 @@ while getopts "i:U:p:d:M:l:w:h" opt; do
         w)
             DISK_WARN_PERCENT="$OPTARG"
             ;;
+        f)
+            FOREGROUND=true
+            DAEMON_MODE=false
+            ;;
         h)
             print_help
             exit 0
@@ -266,6 +282,20 @@ while getopts "i:U:p:d:M:l:w:h" opt; do
             ;;
     esac
 done
+
+# Daemonize if not in foreground mode
+if [[ "$DAEMON_MODE" == true ]]; then
+    # Reconstruct arguments for daemon
+    declare -a daemon_args
+    [[ "$INTERVAL" != "5m" ]] && daemon_args+=("-i" "$INTERVAL")
+    [[ "$QB_USER" != "debian-qbittorrent" ]] && daemon_args+=("-U" "$QB_USER")
+    [[ "$QB_PORT" != "6881" ]] && daemon_args+=("-p" "$QB_PORT")
+    [[ -n "$DATA_DIR" ]] && daemon_args+=("-d" "$DATA_DIR")
+    [[ -n "$DOWNLOAD_DIR" ]] && daemon_args+=("-M" "$DOWNLOAD_DIR")
+    [[ "$LOG_FILE" != "/var/log/qbittorrent-monitor.log" ]] && daemon_args+=("-l" "$LOG_FILE")
+    [[ "$DISK_WARN_PERCENT" != "90" ]] && daemon_args+=("-w" "$DISK_WARN_PERCENT")
+    daemonize "${daemon_args[@]}"
+fi
 
 # Validate interval format
 SLEEP_TIME=$(parse_time_interval "$INTERVAL")
