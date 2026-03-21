@@ -1,0 +1,19 @@
+[Unit]
+Description=qBittorrent-nox Monitor and Recovery Service
+After=network.target qbittorrent-nox.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/path/to/qbittorrent-monitor.sh -i 5 -u m -U debian-qbittorrent
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
