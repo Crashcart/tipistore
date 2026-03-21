@@ -1,15 +1,19 @@
 [Unit]
 Description=qBittorrent-nox Monitor and Recovery Service
 After=network.target qbittorrent-nox.service
+Wants=local-fs.target
 
 [Service]
 Type=simple
 User=root
-ExecStart=/path/to/qbittorrent-monitor.sh -i 5 -u m -U debian-qbittorrent
+ExecStart=/usr/local/bin/qbittorrent-monitor.sh -i 5m -U debian-qbittorrent -d /mnt/qb-data -M /mnt/downloads
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
+
+# Environment
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Security settings
 NoNewPrivileges=true
