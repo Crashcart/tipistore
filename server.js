@@ -8,6 +8,7 @@ const Docker = require('dockerode');
 const axios = require('axios');
 const expressStaticGzip = require('express-static-gzip');
 const reportPlugin = require('./plugins/report-plugin');
+const db = require('./db/init');
 
 const app = express();
 const PORT = process.env.PORT || 31337;
@@ -64,11 +65,8 @@ app.use(expressStaticGzip(path.join(__dirname, 'public'), {
 // Docker client
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
-// Session storage
-const sessions = new Map();
-
-// Command history per session
-const commandHistory = new Map();
+// Initialize database
+db.initializeDatabase();
 
 // Active exec processes (for kill switch)
 const activeProcesses = new Map();
@@ -196,15 +194,10 @@ app.post('/api/auth/login', (req, res) => {
 
   const sessionId = uuidv4();
   const token = Buffer.from(`${sessionId}:${AUTH_SECRET}`).toString('base64');
+  const expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000));
 
-  sessions.set(sessionId, {
-    createdAt: Date.now(),
-    expiresAt: Date.now() + (24 * 60 * 60 * 1000),
-    userId: 'admin',
-    notes: '',
-  });
-
-  commandHistory.set(sessionId, []);
+  // Save session to database
+  db.createSession(sessionId, token, AUTH_SECRET, expiresAt.toISOString());
 
   res.json({ token, sessionId });
 });
@@ -221,11 +214,16 @@ function authenticate(req, res, next) {
     const colonIdx = decoded.indexOf(':');
     const sessionId = decoded.substring(0, colonIdx);
     const secret = decoded.substring(colonIdx + 1);
-    const session = sessions.get(sessionId);
 
-    if (!session || session.expiresAt < Date.now() || secret !== AUTH_SECRET) {
+    // Get session from database
+    const session = db.getSession(sessionId);
+
+    if (!session || secret !== AUTH_SECRET) {
       return res.status(401).json({ error: 'Invalid token' });
     }
+
+    // Update last activity
+    db.updateSessionActivity(sessionId);
 
     req.sessionId = sessionId;
     next();
@@ -245,14 +243,9 @@ app.post('/api/docker/exec', authenticate, async (req, res) => {
     return res.status(400).json({ error: 'Command required' });
   }
 
-  // Store in history
-  const history = commandHistory.get(req.sessionId) || [];
-  history.push({ command, timestamp: new Date().toISOString() });
-  if (history.length > 500) history.shift();
-  commandHistory.set(req.sessionId, history);
-
   try {
     const container = docker.getContainer(KALI_CONTAINER);
+    const startTime = Date.now();
 
     const exec = await container.exec({
       Cmd: ['bash', '-c', command],
@@ -263,6 +256,7 @@ app.post('/api/docker/exec', authenticate, async (req, res) => {
     const execId = exec.id;
     const stream = await exec.start({ Detach: false });
     let output = '';
+    let errorOutput = '';
     let timedOut = false;
 
     activeProcesses.set(execId, exec);
@@ -281,6 +275,12 @@ app.post('/api/docker/exec', authenticate, async (req, res) => {
     stream.on('end', () => {
       clearTimeout(timer);
       activeProcesses.delete(execId);
+
+      const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+
+      // Store command in database
+      db.addCommand(req.sessionId, command, durationSeconds, output, errorOutput, !timedOut);
+
       res.json({
         success: true,
         output: output,
@@ -615,41 +615,29 @@ app.get('/api/cve/:cveId', authenticate, async (req, res) => {
 
 // Get command history
 app.get('/api/session/history', authenticate, (req, res) => {
-  const history = commandHistory.get(req.sessionId) || [];
+  const history = db.getCommandHistory(req.sessionId, 100);
   res.json({ history });
 });
 
 // Session notes (scratchpad)
 app.get('/api/session/notes', authenticate, (req, res) => {
-  const session = sessions.get(req.sessionId);
-  res.json({ notes: session ? session.notes : '' });
+  const notes = db.getSessionNotes(req.sessionId);
+  res.json({ notes });
 });
 
 app.post('/api/session/notes', authenticate, (req, res) => {
   const { notes } = req.body;
-  const session = sessions.get(req.sessionId);
-  if (session) {
-    session.notes = notes || '';
+  try {
+    db.updateSessionNotes(req.sessionId, notes || '');
     res.json({ success: true });
-  } else {
-    res.status(404).json({ error: 'Session not found' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save notes' });
   }
 });
 
 // Export session data
 app.get('/api/session/export', authenticate, (req, res) => {
-  const session = sessions.get(req.sessionId);
-  const history = commandHistory.get(req.sessionId) || [];
-
-  const exportData = {
-    sessionId: req.sessionId,
-    exportedAt: new Date().toISOString(),
-    session: {
-      createdAt: session ? new Date(session.createdAt).toISOString() : null,
-      notes: session ? session.notes : '',
-    },
-    commandHistory: history,
-  };
+  const exportData = db.exportSessionData(req.sessionId);
 
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', `attachment; filename="pentest-session-${req.sessionId.slice(0, 8)}-${Date.now()}.json"`);
@@ -660,18 +648,26 @@ app.get('/api/session/export', authenticate, (req, res) => {
 app.post('/api/reports/generate', authenticate, (req, res) => {
   try {
     const { format = 'html', includeCommandHistory = true, includeCVEs = true } = req.body;
-    const session = sessions.get(req.sessionId);
-    const history = commandHistory.get(req.sessionId) || [];
+    const session = db.getSession(req.sessionId);
+    const history = db.getCommandHistory(req.sessionId, 100);
 
-    // Collect findings from report plugin
-    const findings = reportPlugin.getFindings();
+    // Collect findings from database
+    const findings = db.getFindingsWithCVEs(req.sessionId);
+    const sessionNotes = db.getSessionNotes(req.sessionId);
+
+    // Calculate session duration
+    let sessionDuration = 0;
+    if (session && session.created_at) {
+      const createdAt = new Date(session.created_at).getTime();
+      sessionDuration = Math.round((Date.now() - createdAt) / 1000);
+    }
 
     // Generate base report data
     const reportData = {
       title: 'Penetration Testing Report',
       generated: new Date().toISOString(),
       sessionId: req.sessionId.slice(0, 8),
-      sessionDuration: session ? Math.round((Date.now() - session.createdAt) / 1000) : 0,
+      sessionDuration: sessionDuration,
       totalFindings: findings.length,
       criticalCount: findings.filter(f => f.severity === 'CRITICAL').length,
       highCount: findings.filter(f => f.severity === 'HIGH').length,
@@ -680,7 +676,7 @@ app.post('/api/reports/generate', authenticate, (req, res) => {
       infoCount: findings.filter(f => f.severity === 'INFO').length,
       findings: findings,
       commandHistory: includeCommandHistory ? history : [],
-      sessionNotes: session ? session.notes : '',
+      sessionNotes: sessionNotes,
     };
 
     if (format === 'json') {
