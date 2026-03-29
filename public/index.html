@@ -246,6 +246,7 @@
                     <button class="tab-btn" data-tab="tools">TOOLS</button>
                     <button class="tab-btn" data-tab="general">GENERAL</button>
                     <button class="tab-btn" data-tab="plugins">PLUGINS</button>
+                    <button class="tab-btn" data-tab="proxy">PROXY</button>
                 </div>
 
                 <!-- Ollama Tab -->
@@ -428,6 +429,81 @@
                             <p><strong>Threat Intel Plugin:</strong> Extracts and analyzes IOCs (IPs, domains, hashes)</p>
                             <p><strong>Report Plugin:</strong> Generates professional pentesting reports with findings</p>
                             <p><strong>Export Plugin:</strong> Exports session data in JSON, CSV, or HTML format</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Proxy Tab -->
+                <div class="tab-content" id="tab-proxy">
+                    <div class="setting-group">
+                        <label>Enable Proxy</label>
+                        <select id="proxy-enabled" class="setting-input">
+                            <option value="false">Disabled</option>
+                            <option value="true">Enabled</option>
+                        </select>
+                        <small>Route traffic through an HTTP/SOCKS proxy</small>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Proxy Protocol</label>
+                        <select id="proxy-protocol" class="setting-input">
+                            <option value="http">HTTP</option>
+                            <option value="https">HTTPS</option>
+                            <option value="socks5">SOCKS5</option>
+                        </select>
+                        <small>Proxy type and protocol</small>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Proxy Host</label>
+                        <input type="text" id="proxy-host" placeholder="127.0.0.1 or proxy.example.com" class="setting-input" />
+                        <small>IP address or hostname of proxy server</small>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Proxy Port</label>
+                        <input type="number" id="proxy-port" placeholder="8080" class="setting-input" min="1" max="65535" />
+                        <small>Port number for proxy server</small>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Proxy Username</label>
+                        <input type="text" id="proxy-username" placeholder="(Optional)" class="setting-input" />
+                        <small>Username for proxy authentication (if required)</small>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Proxy Password</label>
+                        <input type="password" id="proxy-password" placeholder="(Optional)" class="setting-input" />
+                        <small>Password for proxy authentication (if required)</small>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Bypass Proxy For</label>
+                        <input type="text" id="proxy-bypass" placeholder="localhost,127.0.0.1,*.local" class="setting-input" />
+                        <small>Comma-separated list of hosts to bypass proxy (e.g., internal targets)</small>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Test Proxy</label>
+                        <div class="input-with-action">
+                            <div id="proxy-status" class="status-box">Not tested</div>
+                            <button class="btn btn-small" id="test-proxy">TEST</button>
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Proxy Configuration</label>
+                        <div class="info-box">
+                            <p><strong>HTTP/HTTPS:</strong> For web traffic and API requests</p>
+                            <p><strong>SOCKS5:</strong> For general-purpose proxy support (port forwarding, etc)</p>
+                            <p><strong>Common Proxies:</strong></p>
+                            <ul style="margin-left: 20px; margin-top: 5px;">
+                                <li>Burp Suite: localhost:8080</li>
+                                <li>mitmproxy: localhost:8080</li>
+                                <li>Squid: your-proxy-server:3128</li>
+                                <li>Corporate proxy: proxy.company.com:port</li>
+                            </ul>
                         </div>
                     </div>
                 </div>

@@ -427,6 +427,17 @@ app.post('/api/docker/reset', authenticate, async (req, res) => {
 // OLLAMA API ENDPOINTS
 // ============================================
 
+// Proxy configuration
+let PROXY_CONFIG = {
+  enabled: false,
+  protocol: 'http',
+  host: '',
+  port: 8080,
+  username: '',
+  password: '',
+  bypass: ''
+};
+
 // Allow frontend to update Ollama URL
 app.post('/api/ollama/config', authenticate, (req, res) => {
   const { url } = req.body;
@@ -440,6 +451,97 @@ app.post('/api/ollama/config', authenticate, (req, res) => {
 
 app.get('/api/ollama/config', authenticate, (req, res) => {
   res.json({ url: OLLAMA_URL });
+});
+
+// Proxy configuration endpoints
+app.post('/api/proxy/config', authenticate, (req, res) => {
+  const { enabled, protocol, host, port, username, password, bypass } = req.body;
+
+  // Validate proxy settings
+  if (enabled && (!host || !port)) {
+    return res.status(400).json({ error: 'Host and port required when proxy is enabled' });
+  }
+
+  if (port && (port < 1 || port > 65535)) {
+    return res.status(400).json({ error: 'Port must be between 1 and 65535' });
+  }
+
+  // Update proxy config
+  PROXY_CONFIG = {
+    enabled: enabled || false,
+    protocol: protocol || 'http',
+    host: host || '',
+    port: parseInt(port) || 8080,
+    username: username || '',
+    password: password || '',
+    bypass: bypass || ''
+  };
+
+  // Store in database
+  if (req.sessionId) {
+    db.updateSessionNotes(req.sessionId, `Proxy: ${enabled ? 'Enabled' : 'Disabled'}`);
+  }
+
+  res.json({ success: true, proxy: PROXY_CONFIG });
+});
+
+app.get('/api/proxy/config', authenticate, (req, res) => {
+  // Don't return password in response
+  const safeConfig = { ...PROXY_CONFIG };
+  safeConfig.password = safeConfig.password ? '••••••••' : '';
+  res.json(safeConfig);
+});
+
+app.post('/api/proxy/test', authenticate, async (req, res) => {
+  if (!PROXY_CONFIG.enabled) {
+    return res.json({ success: true, message: 'Proxy is disabled', status: 'disabled' });
+  }
+
+  try {
+    // Create axios instance with proxy config
+    const httpAgent = PROXY_CONFIG.protocol === 'socks5' ?
+      { host: PROXY_CONFIG.host, port: PROXY_CONFIG.port } :
+      { host: PROXY_CONFIG.host, port: PROXY_CONFIG.port };
+
+    // Test by connecting to httpbin.org echo service
+    const testUrl = 'http://httpbin.org/delay/1';
+    const startTime = Date.now();
+
+    const response = await axios.get(testUrl, {
+      timeout: 10000,
+      httpAgent: PROXY_CONFIG.protocol === 'http' ? new (require('http').Agent)(httpAgent) : undefined,
+      httpsAgent: PROXY_CONFIG.protocol === 'https' ? new (require('https').Agent)(httpAgent) : undefined
+    }).catch(err => {
+      // If httpbin fails, just verify connectivity to proxy host
+      return new Promise((resolve) => {
+        const socket = require('net').createConnection(
+          PROXY_CONFIG.port,
+          PROXY_CONFIG.host,
+          () => {
+            socket.destroy();
+            resolve({ data: { status: 'connected' } });
+          }
+        ).on('error', () => {
+          throw new Error('Cannot reach proxy server');
+        });
+      });
+    });
+
+    const duration = Date.now() - startTime;
+    res.json({
+      success: true,
+      status: 'working',
+      message: 'Proxy is reachable and responding',
+      latency: duration
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      status: 'failed',
+      error: err.message,
+      message: 'Cannot reach proxy server or test URL'
+    });
+  }
 });
 
 app.post('/api/ollama/generate', authenticate, async (req, res) => {

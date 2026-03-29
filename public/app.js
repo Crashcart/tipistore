@@ -141,6 +141,17 @@ class KaliHackerBot {
         this.timestampToggle = document.getElementById('timestamp-toggle');
         this.soundToggle = document.getElementById('sound-toggle');
 
+        // Proxy settings
+        this.proxyEnabled = document.getElementById('proxy-enabled');
+        this.proxyProtocol = document.getElementById('proxy-protocol');
+        this.proxyHost = document.getElementById('proxy-host');
+        this.proxyPort = document.getElementById('proxy-port');
+        this.proxyUsername = document.getElementById('proxy-username');
+        this.proxyPassword = document.getElementById('proxy-password');
+        this.proxyBypass = document.getElementById('proxy-bypass');
+        this.proxyStatusBox = document.getElementById('proxy-status');
+        this.testProxyBtn = document.getElementById('test-proxy');
+
         this.closeSettingsBtn = document.getElementById('close-settings');
         this.saveSettingsBtn = document.getElementById('save-settings');
         this.resetSettingsBtn = document.getElementById('reset-settings');
@@ -220,6 +231,7 @@ class KaliHackerBot {
         this.installBtn.addEventListener('click', () => this.installPackages());
         this.restartContainerBtn.addEventListener('click', () => this.restartContainer());
         this.resetContainerBtn.addEventListener('click', () => this.resetContainer());
+        this.testProxyBtn.addEventListener('click', () => this.testProxyConnection());
 
         this.closeSettingsBtn.addEventListener('click', () => this.closeSettings());
         this.saveSettingsBtn.addEventListener('click', () => this.saveSettings());
@@ -827,8 +839,22 @@ Format: <one-liner command suggestion>`;
         this.timestampToggle.value = this.showTimestamps ? 'true' : 'false';
         this.soundToggle.value = this.soundEnabled ? 'true' : 'false';
 
+        // Load proxy settings
+        this.loadProxySettings();
+
         this.checkOllamaStatus();
         this.loadContainerInfo();
+    }
+
+    loadProxySettings() {
+        const proxySettings = JSON.parse(localStorage.getItem('proxySettings') || '{"enabled":false,"protocol":"http","host":"","port":"8080","username":"","password":"","bypass":""}');
+        this.proxyEnabled.value = proxySettings.enabled ? 'true' : 'false';
+        this.proxyProtocol.value = proxySettings.protocol || 'http';
+        this.proxyHost.value = proxySettings.host || '';
+        this.proxyPort.value = proxySettings.port || '8080';
+        this.proxyUsername.value = proxySettings.username || '';
+        this.proxyPassword.value = '';
+        this.proxyBypass.value = proxySettings.bypass || '';
     }
 
     saveSettings() {
@@ -850,9 +876,55 @@ Format: <one-liner command suggestion>`;
         this.listeningPortDisplay.value = this.listeningPort;
         this.activeModelDisplay.textContent = this.ollamaModel;
 
+        // Save proxy settings
+        this.saveProxySettings();
+
         this.saveUserSettings();
         this.addIntelligenceMessage('✓ Settings saved', 'green');
         this.closeSettings();
+    }
+
+    saveProxySettings() {
+        const proxySettings = {
+            enabled: this.proxyEnabled.value === 'true',
+            protocol: this.proxyProtocol.value,
+            host: this.proxyHost.value,
+            port: this.proxyPort.value,
+            username: this.proxyUsername.value,
+            bypass: this.proxyBypass.value
+        };
+
+        localStorage.setItem('proxySettings', JSON.stringify(proxySettings));
+
+        // Also save to backend
+        this.apiCall('/api/proxy/config', 'POST', {
+            enabled: proxySettings.enabled,
+            protocol: proxySettings.protocol,
+            host: proxySettings.host,
+            port: proxySettings.port,
+            username: proxySettings.username,
+            password: this.proxyPassword.value,
+            bypass: proxySettings.bypass
+        }).catch(err => {
+            console.warn('Failed to save proxy config to backend:', err);
+        });
+    }
+
+    async testProxyConnection() {
+        this.proxyStatusBox.textContent = '⏳ Testing...';
+        try {
+            const response = await this.apiCall('/api/proxy/test', 'POST', {});
+            if (response.success) {
+                this.proxyStatusBox.textContent = `✓ ${response.message} (latency: ${response.latency || 'N/A'}ms)`;
+                this.proxyStatusBox.style.color = '#0f0';
+            } else {
+                this.proxyStatusBox.textContent = `✗ ${response.error || response.message}`;
+                this.proxyStatusBox.style.color = '#f00';
+            }
+        } catch (err) {
+            this.proxyStatusBox.textContent = `✗ Connection failed: ${err.message}`;
+            this.proxyStatusBox.style.color = '#f00';
+        }
     }
 
     resetSettingsToDefaults() {

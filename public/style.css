@@ -1118,6 +1118,32 @@ body {
     border-bottom: none;
 }
 
+.info-box {
+    background: var(--bg-darker);
+    border: 1px solid var(--border-color);
+    padding: 12px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.info-box p {
+    margin: 8px 0;
+}
+
+.info-box p:first-child {
+    margin-top: 0;
+}
+
+.info-box ul {
+    list-style-position: inside;
+}
+
+.info-box li {
+    margin: 4px 0;
+}
+
 #llm-model-selector {
     background: var(--bg-darker);
     color: var(--cyan);
