@@ -55,6 +55,19 @@ Elite browser-based penetration testing terminal that bridges a local Ollama ins
 └─────────────────────────────────────────────────────────┘
 ```
 
+## Technical Design Reference
+
+**For detailed architecture, security model, and design decisions**, see [TDR.md](TDR.md)
+
+Key topics covered:
+- Docker Socket API & Kali access mechanism
+- Ollama integration & model management
+- Plugin system architecture
+- Safety & isolation guardrails (attack targets, protect host)
+- Container isolation details
+- Authorization responsibility model
+- Command audit trail & logging
+
 ## Quick Start
 
 ### Prerequisites
