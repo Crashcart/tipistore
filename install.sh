@@ -66,10 +66,15 @@ else
     MISSING_DEPS=1
 fi
 
-# Check Docker Compose
+# Check Docker Compose (support both docker-compose and docker compose)
 if check_command docker-compose; then
     COMPOSE_VERSION=$(docker-compose --version)
-    log_success "Docker Compose installed: $COMPOSE_VERSION"
+    log_success "Docker Compose installed (docker-compose): $COMPOSE_VERSION"
+    DOCKER_COMPOSE_CMD="docker-compose"
+elif docker compose version &> /dev/null 2>&1; then
+    COMPOSE_VERSION=$(docker compose version)
+    log_success "Docker Compose installed (docker compose): $COMPOSE_VERSION"
+    DOCKER_COMPOSE_CMD="docker compose"
 else
     log_error "Docker Compose not found"
     echo "    Install from: https://docs.docker.com/compose/install/"
@@ -86,7 +91,7 @@ else
     MISSING_DEPS=1
 fi
 
-# Check Ollama
+# Check Ollama (optional - can be configured later in web UI)
 if check_command ollama; then
     OLLAMA_VERSION=$(ollama --version 2>/dev/null || echo "unknown")
     log_success "Ollama installed: $OLLAMA_VERSION"
@@ -99,15 +104,28 @@ if check_command ollama; then
         echo "    Run: ollama serve"
     fi
 else
-    log_warn "Ollama not found"
+    log_warn "Ollama not found (optional)"
     echo "    Install from: https://ollama.ai/"
-    echo "    You can still proceed, but LLM features won't work without Ollama"
+    echo "    You can configure Ollama URL later in Settings → OLLAMA tab"
 fi
 
+# Check for missing critical dependencies
 if [ $MISSING_DEPS -eq 1 ]; then
     echo ""
-    log_error "Some dependencies are missing. Please install them first."
-    exit 1
+    log_error "Critical dependencies are missing. Please install them first."
+    echo ""
+
+    # Check if user wants to skip checks
+    if [[ "$*" == *"--skip-checks"* ]] || [[ "$*" == *"--force"* ]]; then
+        log_warn "Skipping dependency checks as requested"
+    else
+        read -p "    Continue anyway? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+        log_info "Proceeding with installation..."
+    fi
 fi
 
 # ============================================
@@ -182,8 +200,10 @@ echo ""
 log_info "Starting Docker containers..."
 echo ""
 
-docker-compose down 2>/dev/null || true
-docker-compose up -d
+# Use appropriate docker compose command
+COMPOSE_CMD="${DOCKER_COMPOSE_CMD:-docker-compose}"
+$COMPOSE_CMD down 2>/dev/null || true
+$COMPOSE_CMD up -d
 
 log_info "Waiting for containers to be healthy..."
 sleep 5
@@ -193,7 +213,7 @@ if docker ps | grep -q kali-hacker-bot && docker ps | grep -q kali-linux; then
     log_success "All containers are running"
 else
     log_warn "Containers may still be starting, checking logs..."
-    docker-compose logs --tail=10
+    $COMPOSE_CMD logs --tail=10
 fi
 
 # ============================================
@@ -221,8 +241,15 @@ echo ""
 echo -e "${BLUE}Next steps:${NC}"
 echo "    1. Open http://localhost:31337 in your browser"
 echo "    2. Login with the password above"
-echo "    3. Configure target IP in Settings → TARGET"
-echo "    4. Start pentesting!"
+echo "    3. Configure Ollama URL in Settings → OLLAMA (if using external Ollama)"
+echo "    4. Configure target IP in Settings → TARGET"
+echo "    5. Start pentesting!"
+echo ""
+
+echo -e "${BLUE}First-time configuration:${NC}"
+echo "    • Settings → OLLAMA: Configure Ollama URL and model"
+echo "    • Settings → TARGET: Set target IP and listening port"
+echo "    • Settings → PROXY: Configure proxy if needed (optional)"
 echo ""
 
 echo -e "${BLUE}Useful commands:${NC}"
