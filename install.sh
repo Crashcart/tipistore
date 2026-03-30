@@ -22,5 +22,4 @@ docker compose down 2>/dev/null || docker-compose down 2>/dev/null || true
 docker compose up -d 2>/dev/null || docker-compose up -d 2>/dev/null
 
 sleep 3
-echo "✅ http://localhost:31337"
-echo "🔐 $(grep ADMIN_PASSWORD .env | cut -d= -f2)"
+echo "✅ http://localhost:31337 | 🔐 $(grep ADMIN_PASSWORD .env | cut -d= -f2)"
