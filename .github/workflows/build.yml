@@ -1,0 +1,36 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [ main, test, 'claude/**' ]
+  pull_request:
+    branches: [ main, test ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: false
+        tags: kali-hacker-bot:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Validate docker-compose.yml
+      run: |
+        docker-compose config > /dev/null 2>&1 || (echo "❌ Invalid docker-compose.yml" && exit 1)
+        echo "✓ docker-compose.yml is valid"
+
+    - name: Check Dockerfile syntax
+      run: |
+        docker build --dry-run . || (echo "❌ Invalid Dockerfile" && exit 1)
+        echo "✓ Dockerfile is valid"
