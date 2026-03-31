@@ -44,7 +44,7 @@
                 │          │   │   └────▲─────────────┘
     ┌───────────▼──────────▼───▼───────┐│
     │   Kali Linux Container           ││
-    │  (container: kali-linux)         ││
+    │  (container: kali-ai-term-kali)  ││
     │                                   ││
     │  /bin/bash  ◄─ Docker Exec API   ││
     │  (Running tools: nmap,           ││
@@ -103,11 +103,11 @@ Browser (Live Wire Stream)
 - Network: pentest-net (internal bridge)
 - Environment:
   - `OLLAMA_URL=http://host.docker.internal:11434` (routes to host Ollama)
-  - `KALI_CONTAINER=kali-linux` (container name to target)
+  - `KALI_CONTAINER=kali-ai-term-kali` (container name to target)
 
 **Service: kali**
 - Image: `kalilinux/kali-rolling:latest`
-- Container name: `kali-linux` (must match KALI_CONTAINER env var)
+- Container name: `kali-ai-term-kali` (must match KALI_CONTAINER env var)
 - TTY + stdin: Enabled for interactive shell
 - Network: pentest-net
 - Command: `/bin/bash` (keeps container running)
@@ -120,7 +120,7 @@ Browser (Live Wire Stream)
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 // In /api/docker/exec endpoint:
-const container = docker.getContainer(KALI_CONTAINER); // 'kali-linux'
+const container = docker.getContainer(KALI_CONTAINER); // 'kali-ai-term-kali'
 
 const exec = await container.exec({
   Cmd: ['bash', '-c', command],        // Execute bash command
@@ -455,7 +455,7 @@ commandHistory stores:
 Before deployment, verify:
 - [ ] Docker daemon accessible on host
 - [ ] `/var/run/docker.sock` mounted in app container (read-only)
-- [ ] Kali container named exactly `kali-linux`
+- [ ] Kali container named exactly `kali-ai-term-kali`
 - [ ] Ollama running on host at `http://host.docker.internal:11434`
 - [ ] Models `dolphin-mixtral` and `neural-chat:7b` available
 - [ ] Node.js 18+ with npm
