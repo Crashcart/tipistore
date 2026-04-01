@@ -9,11 +9,19 @@ const axios = require('axios');
 const expressStaticGzip = require('express-static-gzip');
 const reportPlugin = require('./plugins/report-plugin');
 const db = require('./db/init');
+const { createLogger } = require('./lib/install-logger');
+
+// Initialize logger
+const logger = createLogger('app');
+logger.trackSystemInfo();
+logger.trackEnvironment();
+logger.info('Application starting...');
 
 const app = express();
 const PORT = process.env.PORT || 31337;
+const BIND_HOST = process.env.BIND_HOST || '0.0.0.0';
 let OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const KALI_CONTAINER = process.env.KALI_CONTAINER || 'kali-linux';
+const KALI_CONTAINER = process.env.KALI_CONTAINER || 'kali-ai-term-kali';
 
 // Pentesting system prompt for Ollama
 const SYSTEM_PROMPT = `You are an elite penetration testing AI assistant embedded in a Kali Linux terminal. You have deep expertise in:
@@ -1018,13 +1026,34 @@ async function checkOllamaHealth() {
 // START SERVER
 // ============================================
 
-app.listen(PORT, () => {
+app.listen(PORT, BIND_HOST, async () => {
+  const HOST_DISPLAY = BIND_HOST === '0.0.0.0' ? 'localhost' : BIND_HOST;
   console.log(`\n  ╔══════════════════════════════════════════╗`);
   console.log(`  ║     KALI HACKER BOT v1.0                ║`);
   console.log(`  ╠══════════════════════════════════════════╣`);
-  console.log(`  ║  Web UI:    http://localhost:${PORT}      ║`);
+  console.log(`  ║  Web UI:    http://${HOST_DISPLAY}:${PORT}`.padEnd(44) + `║`);
+  console.log(`  ║  Bind:      ${BIND_HOST}`.padEnd(44) + `║`);
   console.log(`  ║  Docker:    /var/run/docker.sock         ║`);
   console.log(`  ║  Ollama:    ${OLLAMA_URL.padEnd(28)}║`);
   console.log(`  ║  Container: ${KALI_CONTAINER.padEnd(28)}║`);
   console.log(`  ╚══════════════════════════════════════════╝\n`);
+
+  // Log server startup
+  logger.success('Server listening', { port: PORT, host: BIND_HOST });
+
+  // Check Docker health
+  const dockerHealth = await checkDockerHealth();
+  if (dockerHealth.connected) {
+    logger.success('Docker connection established', { container: KALI_CONTAINER, running: dockerHealth.containerRunning });
+  } else {
+    logger.error('Docker connection failed', { error: dockerHealth.error });
+  }
+
+  // Check Ollama health
+  const ollamaHealth = await checkOllamaHealth();
+  if (ollamaHealth.connected) {
+    logger.success('Ollama connection established', { url: OLLAMA_URL, models: ollamaHealth.modelCount });
+  } else {
+    logger.warn('Ollama connection failed', { error: ollamaHealth.error });
+  }
 });

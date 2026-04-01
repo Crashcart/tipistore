@@ -104,6 +104,110 @@ Key topics covered:
 docker-compose down
 ```
 
+## Troubleshooting & Log Files
+
+### Installation Logs
+
+All installation, update, and uninstall scripts create detailed log files for troubleshooting:
+
+**Log File Locations:**
+```
+install-TIMESTAMP.log       # Timestamped installation log
+install.log                 # Symlink to latest installation log
+install.diagnostic          # JSON diagnostic report
+update-TIMESTAMP.log        # Update operation log
+uninstall-TIMESTAMP.log     # Uninstall operation log
+```
+
+### Analyzing Installation Issues
+
+If installation fails or containers don't start:
+
+**1. Check the log file:**
+```bash
+tail -50 install.log    # View last 50 lines
+less install.log        # Full log with search
+```
+
+**2. View the diagnostic report:**
+```bash
+cat install.diagnostic  # JSON format with system info, exit codes, errors
+```
+
+**3. Run the diagnostic analyzer:**
+```bash
+node lib/diagnostic-analyzer.js install.diagnostic
+```
+
+This will:
+- ✓ Identify errors and categorize them
+- ✓ Suggest fixes for common issues
+- ✓ Show container state
+- ✓ Display system requirements
+
+**4. Use the interactive diagnostic menu:**
+```bash
+node lib/install-menu.js install.diagnostic install.log
+```
+
+This provides an interactive menu to explore issues.
+
+### Common Issues
+
+**"npm install failed with ERESOLVE error"**
+- Check logs for suggested fix
+- Usually: `npm ci --legacy-peer-deps` or `rm package-lock.json && npm install`
+
+**"Docker containers created but not running"**
+```bash
+# Check logs for Docker issues:
+docker logs kali-ai-term-app
+docker logs kali-ai-term-kali
+```
+
+**"Ollama connection failed"**
+```bash
+# Verify Ollama is running on host:
+curl http://localhost:11434/api/tags
+# If not running:
+ollama serve
+```
+
+### Understanding Sensitive Data Masking
+
+Log files mask sensitive values for security:
+```
+ADMIN_PASSWORD=*** (instead of actual password)
+AUTH_SECRET=*** (instead of actual UUID)
+API_KEY=*** (instead of actual key)
+```
+
+This allows safe sharing of logs with support without exposing secrets.
+
+### Log Rotation
+
+Installation logs are automatically rotated:
+- **Keep:** Last 5 installation runs
+- **Delete:** Older logs automatically
+- **Format:** `install-2024-03-15-10-30-45.log`
+
+### Application Logs
+
+Runtime application logs (after startup):
+```bash
+# View app container logs
+docker logs -f kali-ai-term-app
+
+# View Kali container logs  
+docker logs -f kali-ai-term-kali
+
+# Set log level in .env
+LOG_LEVEL=debug  # verbose
+LOG_LEVEL=info   # standard (recommended)
+LOG_LEVEL=warn   # warnings only
+LOG_LEVEL=error  # errors only
+```
+
 ## Usage Guide
 
 ### Authentication
