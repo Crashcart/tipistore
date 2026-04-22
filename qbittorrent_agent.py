@@ -174,7 +174,7 @@ Examples:
             type=str,
             choices=["aggressive", "balanced", "conservative"],
             default="balanced",
-            help="Lag detection sensitivity (default: balanced)",
+            help="Lag detection sensitivity: aggressive=sensitive, balanced=medium (default), conservative=tolerant",
         )
 
         # Logging
