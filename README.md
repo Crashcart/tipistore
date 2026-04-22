@@ -19,12 +19,20 @@ Intelligent monitoring and recovery daemon for qBittorrent-nox. Detects when qBi
 5. **Torrent Refresh** - Pause and resume torrents to reset state
 6. **Restart Process** - Graceful restart (last resort)
 
-### ⚙️ Configuration
+### ⚙️ Advanced Features
 - Rule-based decision making (not AI)
 - Balanced lag detection (configurable: aggressive/balanced/conservative)
 - User-specified config paths (preserves defaults)
 - Detailed logging with decision tracking
 - Dry-run mode for testing
+- **Notifications** - Email, webhook, and syslog alerts
+- **Auto-Tuning** - System-aware configuration recommendations
+- **State Snapshots** - Backup and restore recovery state
+- **Completion Prediction** - ETA calculations and speed analysis
+- **A/B Testing** - Optimize recovery strategies over time
+- **Docker Support** - Run agent in containers with Prometheus export
+- **Multi-Server** - Manage multiple qBittorrent instances
+- **Per-Category Rules** - Different strategies by torrent category
 
 ## Installation
 
@@ -290,28 +298,179 @@ file ~/.config/qBittorrent/qBittorrent.conf
 ## Architecture
 
 ```
-qbittorrent_agent.py      Main entry point & CLI
+qbittorrent_agent.py              Main entry point & CLI
 ├── detectors/
-│   └── lag_detector.py    Multi-factor lag detection
+│   ├── lag_detector.py           Multi-factor lag detection
+│   ├── torrent_health.py         Health scoring system
+│   ├── predictive_analyzer.py    Trend-based predictions
+│   └── completion_predictor.py   ETA calculations
 ├── recovery/
-│   └── recovery_engine.py Recovery strategy execution
+│   ├── recovery_engine.py        Recovery strategy execution
+│   ├── bandwidth_optimizer.py    Dynamic bandwidth tuning
+│   ├── connection_optimizer.py   Connection limit optimization
+│   ├── category_rules.py         Per-category recovery rules
+│   ├── config_auto_tuner.py      System-aware recommendations
+│   ├── multi_server_manager.py   Multi-instance support
+│   └── backup_restore.py         State snapshots
 ├── qbt_api/
-│   ├── api_client.py      Web API client
-│   └── config_manager.py  Config file handling
+│   ├── api_client.py             Web API client
+│   └── config_manager.py         Config file handling
 ├── monitoring/
-│   └── metrics.py         System metrics collection
-└── logging/
-    └── agent_logger.py    Logging configuration
+│   ├── metrics.py                System metrics collection
+│   └── prometheus_exporter.py    Prometheus metrics export
+├── logging/
+│   ├── agent_logger.py           Logging configuration
+│   └── notification_system.py    Multi-channel notifications
+├── integration/
+│   └── docker_integration.py     Docker container support
+├── optimization/
+│   └── ab_testing_framework.py   Strategy optimization
+└── tests/
+    └── test_integration.py       Integration tests
 ```
 
 ## Requirements
 
 - Python 3.8+
-- requests (HTTP client)
+- requests (HTTP client for webhooks and API)
 - psutil (system metrics)
 - configparser (config parsing)
+- python-daemon (daemon mode)
 
 See `requirements.txt` for versions.
+
+## Advanced Features
+
+### 📬 Notifications
+
+Configure alerts through multiple channels:
+
+```bash
+# Email notifications
+./qbittorrent_agent.py --qbt-config ... \
+  --notify-email-smtp smtp.gmail.com \
+  --notify-email-port 587 \
+  --notify-email-from user@gmail.com \
+  --notify-email-password APP_PASSWORD \
+  --notify-email-to admin@example.com
+
+# Webhook notifications
+./qbittorrent_agent.py --qbt-config ... \
+  --notify-webhook https://hooks.slack.com/services/YOUR/WEBHOOK
+
+# Syslog notifications
+./qbittorrent_agent.py --qbt-config ... \
+  --notify-syslog local0
+```
+
+### 🎯 Completion Prediction
+
+The agent predicts torrent completion times:
+
+```bash
+# View predictions in real-time
+tail -f /var/log/qbittorrent-agent.log | grep "ETA"
+```
+
+Predictions improve over time as the agent collects speed history.
+
+### ⚙️ Auto-Configuration Tuning
+
+Let the agent suggest optimal settings based on your system:
+
+```bash
+# Get recommendations (dry-run only)
+./qbittorrent_agent.py --qbt-config ... --suggest-config
+```
+
+Suggestions include:
+- Connection limits based on available memory
+- Bandwidth limits based on CPU cores
+- Cache size based on RAM
+- Piece size for disk I/O optimization
+- Active torrent count recommendations
+
+### 📊 A/B Testing
+
+Compare recovery strategies:
+
+```bash
+# Enable A/B testing
+./qbittorrent_agent.py --qbt-config ... --enable-ab-testing
+
+# View results
+curl http://localhost:8081/ab-testing/results
+```
+
+### 🐳 Docker Deployment
+
+Run the agent in a container:
+
+```bash
+# Build image
+docker build -t qbittorrent-agent .
+
+# Run container
+docker run -d \
+  --name qb-agent \
+  --network host \
+  -e QBT_HOST=localhost \
+  -e QBT_PORT=8080 \
+  qbittorrent-agent
+
+# Or use docker-compose
+docker-compose up -d
+```
+
+### 💾 State Backup & Restore
+
+Automatic snapshots of recovery state:
+
+```bash
+# Snapshots saved to /var/lib/qbittorrent-agent/backups/
+# Each contains: lag_score, applied_limits, system_metrics, recovery_attempts
+
+# View snapshots
+ls -la /var/lib/qbittorrent-agent/backups/
+
+# Restore from snapshot (manual)
+python3 -c "
+from recovery.backup_restore import BackupRestoreManager
+mgr = BackupRestoreManager()
+snapshot = mgr.load_snapshot_from_file('backups/20240101_120000.json')
+print(f'Lag score: {snapshot.lag_score}')
+"
+```
+
+### 📈 Prometheus Metrics
+
+Export metrics for monitoring and visualization:
+
+```bash
+# Enable Prometheus export
+./qbittorrent_agent.py --qbt-config ... --enable-prometheus --prometheus-port 8081
+
+# Scrape metrics
+curl http://localhost:8081/metrics
+
+# Configure Prometheus (prometheus.yml)
+scrape_configs:
+  - job_name: 'qbittorrent-agent'
+    static_configs:
+      - targets: ['localhost:8081']
+    scrape_interval: 30s
+
+# View in Grafana
+# Import the generated dashboard template for instant visualization
+```
+
+Exported metrics include:
+- qBittorrent speeds, peer counts, DHT nodes
+- Lag score and detection status
+- Applied connection/bandwidth limits
+- System CPU, memory, disk usage
+- Recovery attempt counts
+- Notification history
 
 ## Security
 
@@ -321,6 +480,8 @@ See `requirements.txt` for versions.
 - ✓ Graceful error handling
 - ✓ Detailed audit logging
 - ✓ Dry-run mode for testing
+- ✓ Credentials stored securely (not in configs)
+- ✓ Optional TLS for webhook/SMTP
 
 ## Contributing
 
