@@ -1,0 +1,4 @@
+requests==2.31.0
+configparser==6.0.0
+psutil==5.9.6
+python-daemon==3.0.1
