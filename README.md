@@ -62,46 +62,42 @@ find ~ -name "*.conf" -path "*/qBittorrent/*" 2>/dev/null
 ### Basic Usage
 
 ```bash
-# Basic monitoring (balanced sensitivity)
-./qbittorrent_agent.py --qbt-config ~/.config/qBittorrent/qBittorrent.conf
+# Basic monitoring (uses default config at ~/.config/qBittorrent/qBittorrent.conf)
+./qbittorrent_agent.py
 
 # Aggressive monitoring (more sensitive to lag)
-./qbittorrent_agent.py --qbt-config ~/.config/qBittorrent/qBittorrent.conf \
-                        --sensitivity aggressive
+./qbittorrent_agent.py --sensitivity aggressive
 
 # Conservative monitoring (only fix severe issues)
-./qbittorrent_agent.py --qbt-config ~/.config/qBittorrent/qBittorrent.conf \
-                        --sensitivity conservative
+./qbittorrent_agent.py --sensitivity conservative
+
+# Custom config location
+./qbittorrent_agent.py --qbt-config /mnt/nas/qBittorrent/qBittorrent.conf
 ```
 
 ### Advanced Options
 
 ```bash
 # Dry run - see what would happen without making changes
-./qbittorrent_agent.py --qbt-config ~/.config/qBittorrent/qBittorrent.conf \
-                        --dry-run
+./qbittorrent_agent.py --dry-run
 
 # Custom API port
-./qbittorrent_agent.py --qbt-config ~/.config/qBittorrent/qBittorrent.conf \
-                        --qbt-port 8080
+./qbittorrent_agent.py --qbt-port 8080
 
 # Custom monitoring interval (seconds)
-./qbittorrent_agent.py --qbt-config ~/.config/qBittorrent/qBittorrent.conf \
-                        --interval 30
+./qbittorrent_agent.py --interval 30
 
 # Verbose logging
-./qbittorrent_agent.py --qbt-config ~/.config/qBittorrent/qBittorrent.conf \
-                        --log-level DEBUG
+./qbittorrent_agent.py --log-level DEBUG
 
 # Custom log file
-./qbittorrent_agent.py --qbt-config ~/.config/qBittorrent/qBittorrent.conf \
-                        --log-file /tmp/qb-agent.log
+./qbittorrent_agent.py --log-file /tmp/qb-agent.log
 ```
 
 ### Command-Line Options
 
 ```
---qbt-config PATH           Path to qBittorrent config file (REQUIRED)
+--qbt-config PATH           Path to qBittorrent config file (default: ~/.config/qBittorrent/qBittorrent.conf)
 --qbt-port PORT             Web API port (default: 8080)
 --qbt-username USER         Web API username (if auth required)
 --qbt-password PASS         Web API password (if auth required)
@@ -167,6 +163,13 @@ Each strategy waits for effect before next action. Stops if lag resolves.
 
 ## Configuration Examples
 
+### Default Setup (Standard User)
+
+```bash
+# Uses default config location: ~/.config/qBittorrent/qBittorrent.conf
+./qbittorrent_agent.py
+```
+
 ### Standard NAS Setup
 
 ```bash
@@ -180,7 +183,6 @@ Each strategy waits for effect before next action. Stops if lag resolves.
 
 ```bash
 ./qbittorrent_agent.py \
-  --qbt-config ~/.config/qBittorrent/qBittorrent.conf \
   --interval 10 \
   --sensitivity aggressive \
   --log-level DEBUG
@@ -190,7 +192,6 @@ Each strategy waits for effect before next action. Stops if lag resolves.
 
 ```bash
 ./qbittorrent_agent.py \
-  --qbt-config ~/.config/qBittorrent/qBittorrent.conf \
   --interval 120 \
   --sensitivity conservative
 ```
@@ -210,7 +211,6 @@ Type=simple
 User=debian-qbittorrent
 WorkingDirectory=/opt/qbittorrent-agent
 ExecStart=/opt/qbittorrent-agent/qbittorrent_agent.py \
-  --qbt-config /home/debian-qbittorrent/.config/qBittorrent/qBittorrent.conf \
   --interval 60 \
   --sensitivity balanced
 Restart=on-failure
@@ -218,6 +218,15 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
+```
+
+Or with custom config path:
+
+```ini
+ExecStart=/opt/qbittorrent-agent/qbittorrent_agent.py \
+  --qbt-config /mnt/nas/qBittorrent/qBittorrent.conf \
+  --interval 60 \
+  --sensitivity balanced
 ```
 
 Enable and start:

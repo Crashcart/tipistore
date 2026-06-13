@@ -47,8 +47,9 @@ class QBittorrentAgent:
             sys.exit(1)
 
         try:
-            self.config_manager = ConfigManager(args.qbt_config_path)
-            self.logger.info(f"Loaded qBittorrent config from {args.qbt_config_path}")
+            config_path = args.qbt_config_path if hasattr(args, 'qbt_config_path') else args.qbt_config
+            self.config_manager = ConfigManager(config_path)
+            self.logger.info(f"Loaded qBittorrent config from {config_path}")
         except Exception as e:
             self.logger.error(f"Failed to load config: {e}")
             sys.exit(1)
@@ -120,19 +121,20 @@ class QBittorrentAgent:
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 Examples:
-  # Basic monitoring with default settings
-  %(prog)s --qbt-config ~/.config/qBittorrent/qBittorrent.conf
+  # Basic monitoring with default config location
+  %(prog)s
+
+  # Custom config location
+  %(prog)s --qbt-config /mnt/nas/qBittorrent/qBittorrent.conf
 
   # Custom port and sensitivity
-  %(prog)s --qbt-config ~/.config/qBittorrent/qBittorrent.conf \\
-           --qbt-port 8080 --sensitivity balanced
+  %(prog)s --qbt-port 8080 --sensitivity balanced
 
   # Dry run to see what would happen
-  %(prog)s --qbt-config ~/.config/qBittorrent/qBittorrent.conf --dry-run
+  %(prog)s --dry-run
 
   # Verbose logging
-  %(prog)s --qbt-config ~/.config/qBittorrent/qBittorrent.conf \\
-           --log-level DEBUG
+  %(prog)s --log-level DEBUG
             """,
         )
 
@@ -140,8 +142,8 @@ Examples:
         parser.add_argument(
             "--qbt-config",
             type=str,
-            required=True,
-            help="Path to qBittorrent config file",
+            default=str(Path.home() / ".config" / "qBittorrent" / "qBittorrent.conf"),
+            help="Path to qBittorrent config file (default: ~/.config/qBittorrent/qBittorrent.conf)",
         )
         parser.add_argument(
             "--qbt-port",
@@ -213,10 +215,17 @@ def main():
     args = parser.parse_args()
 
     # Validate config path exists
-    config_path = Path(args.qbt_config)
+    config_path = Path(args.qbt_config).expanduser()
     if not config_path.exists():
-        print(f"Error: qBittorrent config not found: {args.qbt_config}", file=sys.stderr)
+        print(f"Error: qBittorrent config not found: {config_path}", file=sys.stderr)
+        print(f"\nTip: Specify custom location with --qbt-config /path/to/qBittorrent.conf", file=sys.stderr)
+        print(f"Common locations:", file=sys.stderr)
+        print(f"  ~/.config/qBittorrent/qBittorrent.conf", file=sys.stderr)
+        print(f"  /mnt/nas/qbittorrent/qBittorrent.conf", file=sys.stderr)
         sys.exit(1)
+
+    # Update args with expanded path
+    args.qbt_config_path = str(config_path)
 
     # Create and run agent
     agent = QBittorrentAgent(args)
