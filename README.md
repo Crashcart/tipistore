@@ -50,11 +50,37 @@ cd qbittorrent-monitor.sh
 
 # Install Python dependencies
 pip install -r requirements.txt
+```
 
-# Find your qBittorrent config
-find ~/.config -name "qBittorrent.conf" 2>/dev/null
-# or 
-find ~ -name "*.conf" -path "*/qBittorrent/*" 2>/dev/null
+### Configuration Path
+
+The agent automatically looks for your qBittorrent config at the **standard default location**:
+
+```
+~/.config/qBittorrent/qBittorrent.conf
+```
+
+If your config is in this standard location, you can start the agent immediately with:
+
+```bash
+./qbittorrent_agent.py
+```
+
+**Custom locations:** If your config is elsewhere, specify it explicitly:
+
+```bash
+./qbittorrent_agent.py --qbt-config /mnt/nas/qbittorrent/qBittorrent.conf
+./qbittorrent_agent.py --qbt-config /home/user/.config/qBittorrent/qBittorrent.conf
+```
+
+**Find your config:**
+
+```bash
+# Standard location
+cat ~/.config/qBittorrent/qBittorrent.conf
+
+# Search for it
+find ~ -name "qBittorrent.conf" 2>/dev/null
 ```
 
 ## Usage
@@ -296,13 +322,23 @@ curl http://127.0.0.1:8080/api/v2/app/webapiVersion
 
 ### Config file not found
 
+The agent defaults to `~/.config/qBittorrent/qBittorrent.conf`. If that doesn't work:
+
 ```bash
 # Find your qBittorrent config
 find ~ -name "qBittorrent.conf" 2>/dev/null
 
-# Check full path
-file ~/.config/qBittorrent/qBittorrent.conf
+# Check standard location
+cat ~/.config/qBittorrent/qBittorrent.conf
+
+# Use custom path
+./qbittorrent_agent.py --qbt-config /path/to/your/qBittorrent.conf
 ```
+
+**Common locations:**
+- `~/.config/qBittorrent/qBittorrent.conf` (default, standard Linux)
+- `/mnt/nas/qbittorrent/qBittorrent.conf` (NAS setups)
+- `/home/debian-qbittorrent/.config/qBittorrent/qBittorrent.conf` (systemd service user)
 
 ## Architecture
 
