@@ -1,251 +1,223 @@
-"""Recovery engine for qBittorrent."""
+"""Recovery engine: executes real recovery strategies in escalating order."""
 
 import time
-from typing import List, Dict, Any
+import subprocess
+from typing import List, Optional
+
+from recovery.connection_optimizer import ConnectionOptimizer
+from recovery.bandwidth_optimizer import BandwidthOptimizer
 
 
 class RecoveryEngine:
-    """Executes recovery strategies in intelligent order."""
+    """Executes recovery strategies from least to most invasive."""
 
-    def __init__(self, api_client, config_manager, logger=None):
-        """Initialize recovery engine.
+    def __init__(
+        self,
+        api_client,
+        config_manager,
+        system_metrics=None,
+        service_name: str = "qbittorrent-nox",
+        drain_timeout: int = 15,
+        dry_run: bool = False,
+        notifier=None,
+        logger=None,
+    ):
+        """Initialize the recovery engine.
 
         Args:
-            api_client: QBittorrent API client
-            config_manager: Configuration manager
-            logger: Logger instance
+            api_client: QBittorrentAPIClient.
+            config_manager: ConfigManager.
+            system_metrics: SystemMetrics instance (for dynamic limits).
+            service_name: systemd unit name for restarts.
+            drain_timeout: Seconds to pause/drain torrents before a restart (5g).
+            dry_run: Log intended actions without making changes.
+            notifier: Optional NotificationSystem.
+            logger: Optional logger.
         """
         self.api_client = api_client
         self.config_manager = config_manager
+        self.system_metrics = system_metrics
+        self.service_name = service_name
+        self.drain_timeout = drain_timeout
+        self.dry_run = dry_run
+        self.notifier = notifier
         self.logger = logger
 
-        # Recovery strategies in order (least to most invasive)
-        self.strategies = [
-            ("connection_cleanup", self._connection_cleanup, 15),
-            ("dht_refresh", self._dht_refresh, 10),
-            ("reload_config", self._reload_config, 10),
-            ("dynamic_limits", self._dynamic_limits, 20),
-            ("torrent_refresh", self._torrent_refresh, 30),
-            ("restart_process", self._restart_process, 60),
+        self.connection_optimizer = ConnectionOptimizer(logger=logger)
+
+        self.strategies = {
+            "connection_cleanup": (self._connection_cleanup, 30),
+            "dht_refresh": (self._dht_refresh, 40),
+            "reload_config": (self._reload_config, 50),
+            "dynamic_limits": (self._dynamic_limits, 60),
+            "torrent_refresh": (self._torrent_refresh, 75),
+            "restart_process": (self._restart_process, 85),
+        }
+
+    # ------------------------------------------------------------------ #
+    # Planning + orchestration
+    # ------------------------------------------------------------------ #
+    def get_recovery_plan(self, lag_score: float) -> List[str]:
+        """Return the ordered strategies whose threshold the score exceeds."""
+        return [
+            name
+            for name, (_func, threshold) in self.strategies.items()
+            if lag_score > threshold
         ]
 
-    def get_recovery_plan(self, lag_score: float) -> List[str]:
-        """Get the recovery plan for a given lag score.
-
-        Args:
-            lag_score: Lag detection score (0-100)
-
-        Returns:
-            List of strategy names to execute
-        """
-        plan = []
-
-        # Determine which strategies to execute based on lag score
-        if lag_score > 30:
-            plan.append("connection_cleanup")
-        if lag_score > 40:
-            plan.append("dht_refresh")
-        if lag_score > 50:
-            plan.append("reload_config")
-        if lag_score > 60:
-            plan.append("dynamic_limits")
-        if lag_score > 75:
-            plan.append("torrent_refresh")
-        if lag_score > 85:
-            plan.append("restart_process")
-
-        return plan
-
     def execute_recovery(self, lag_score: float) -> bool:
-        """Execute recovery strategies based on lag score.
-
-        Args:
-            lag_score: Lag detection score (0-100)
-
-        Returns:
-            True if recovery was successful
-        """
-        try:
-            plan = self.get_recovery_plan(lag_score)
-
-            if not plan:
-                if self.logger:
-                    self.logger.info("No recovery needed")
-                return True
-
+        """Execute the recovery plan for the given lag score."""
+        plan = self.get_recovery_plan(lag_score)
+        if not plan:
             if self.logger:
-                self.logger.info(f"Executing recovery plan: {', '.join(plan)}")
-
-            for strategy_name in plan:
-                if self.logger:
-                    self.logger.info(f"Executing strategy: {strategy_name}")
-
-                success = self._execute_strategy(strategy_name)
-
-                if not success:
-                    if self.logger:
-                        self.logger.warning(f"Strategy {strategy_name} failed")
-                    continue
-
-                # Check if lag improved after this strategy
-                time.sleep(5)  # Wait for effect
-
-                if self.logger:
-                    self.logger.info(f"Strategy {strategy_name} executed")
-
+                self.logger.info("No recovery needed")
             return True
 
-        except Exception as e:
+        if self.logger:
+            self.logger.info(
+                f"{'[DRY RUN] ' if self.dry_run else ''}Recovery plan "
+                f"(lag {lag_score:.0f}): {', '.join(plan)}"
+            )
+        self._notify("WARNING", "qBittorrent recovery", f"lag {lag_score:.0f}: {', '.join(plan)}")
+
+        for name in plan:
+            func, _ = self.strategies[name]
             if self.logger:
-                self.logger.error(f"Recovery execution error: {e}", exc_info=True)
-            return False
+                self.logger.info(f"Strategy: {name}")
+            try:
+                func()
+            except Exception as e:
+                if self.logger:
+                    self.logger.error(f"Strategy {name} failed: {e}")
+                continue
+            time.sleep(2)
+        return True
 
-    def _execute_strategy(self, strategy_name: str) -> bool:
-        """Execute a single recovery strategy.
-
-        Args:
-            strategy_name: Name of the strategy
-
-        Returns:
-            True if successful
-        """
-        for name, func, _ in self.strategies:
-            if name == strategy_name:
-                try:
-                    return func()
-                except Exception as e:
-                    if self.logger:
-                        self.logger.error(f"Strategy {strategy_name} error: {e}")
-                    return False
-        return False
-
+    # ------------------------------------------------------------------ #
+    # Strategies (all respect dry_run)
+    # ------------------------------------------------------------------ #
     def _connection_cleanup(self) -> bool:
-        """Clear stale connections and peers."""
-        try:
-            if self.logger:
-                self.logger.debug("Cleaning up stale connections")
-
-            # Implementation would interact with qBittorrent API
-            # to reset peer connections
-            self.api_client.purge_all_cache()
-
+        """Force a tracker re-announce to refresh peers/connections."""
+        if self.dry_run:
+            self.logger and self.logger.info("[DRY RUN] would reannounce all torrents")
             return True
-        except Exception as e:
-            if self.logger:
-                self.logger.error(f"Connection cleanup error: {e}")
-            return False
+        return self.api_client.reannounce_all()
 
     def _dht_refresh(self) -> bool:
-        """Trigger full DHT node rescan."""
-        try:
-            if self.logger:
-                self.logger.debug("Refreshing DHT")
-
-            # Implementation would trigger DHT rescan
-            # This might require API call or config manipulation
-            stats = self.api_client.get_server_state()
-            current_dht = stats.get("dht_nodes", 0)
-
-            if self.logger:
-                self.logger.info(f"DHT nodes before refresh: {current_dht}")
-
-            # Note: Actual DHT refresh would require API enhancement
+        """Re-bootstrap DHT by toggling it off then back on."""
+        prefs = self.api_client.get_preferences() or {}
+        if not prefs.get("dht", True):
+            self.logger and self.logger.info("DHT disabled in config; skipping refresh")
             return True
-        except Exception as e:
-            if self.logger:
-                self.logger.error(f"DHT refresh error: {e}")
-            return False
+        if self.dry_run:
+            self.logger and self.logger.info("[DRY RUN] would toggle DHT off/on")
+            return True
+        self.api_client.set_preferences({"dht": False})
+        time.sleep(3)
+        return self.api_client.set_preferences({"dht": True})
 
     def _reload_config(self) -> bool:
-        """Reload configuration from disk."""
-        try:
-            if self.logger:
-                self.logger.debug("Reloading configuration")
-
-            # Reload config manager
-            self.config_manager.reload()
-
-            return True
-        except Exception as e:
-            if self.logger:
-                self.logger.error(f"Config reload error: {e}")
-            return False
+        """Reload the qBittorrent config from disk into the agent's view."""
+        self.config_manager.reload()
+        return True
 
     def _dynamic_limits(self) -> bool:
-        """Adjust connection/bandwidth limits based on system capacity."""
-        try:
-            if self.logger:
-                self.logger.debug("Adjusting dynamic limits")
-
-            # Would analyze system capacity and adjust qBittorrent limits
-            # This requires API calls to qBittorrent to set preferences
+        """Adjust connection and bandwidth limits to current system capacity."""
+        if self.system_metrics is None:
             return True
-        except Exception as e:
-            if self.logger:
-                self.logger.error(f"Dynamic limits error: {e}")
-            return False
+
+        suggestion = self.connection_optimizer.suggest_connection_limits(
+            self.api_client, self.system_metrics
+        )
+        rec_limit = suggestion.get("recommended_limit")
+        rec_peer = suggestion.get("recommended_peer_limit")
+
+        if self.dry_run:
+            self.logger and self.logger.info(
+                f"[DRY RUN] would set connection limits {rec_limit}/{rec_peer} "
+                f"and re-tune bandwidth"
+            )
+            return True
+
+        if rec_limit and rec_peer:
+            self.connection_optimizer.apply_connection_limits(self.api_client, rec_limit, rec_peer)
+
+        bandwidth = BandwidthOptimizer(self.api_client, self.system_metrics, self.logger)
+        bandwidth.optimize_bandwidth()
+        return True
 
     def _torrent_refresh(self) -> bool:
-        """Pause and resume torrents to reset internal state."""
-        try:
-            if self.logger:
-                self.logger.debug("Refreshing torrents")
-
-            torrents = self.api_client.get_torrents()
-            paused_count = 0
-            resumed_count = 0
-
-            # Pause all torrents
-            for torrent in torrents:
-                if torrent.get("state") not in ["pausedDL", "pausedUP"]:
-                    self.api_client.pause_torrent(torrent["hash"])
-                    paused_count += 1
-
-            # Wait
-            time.sleep(10)
-
-            # Resume all torrents
-            for torrent in torrents:
-                if torrent.get("state") in ["pausedDL", "pausedUP"]:
-                    self.api_client.resume_torrent(torrent["hash"])
-                    resumed_count += 1
-
-            if self.logger:
-                self.logger.info(f"Paused {paused_count}, resumed {resumed_count} torrents")
-
+        """Pause then resume all torrents to reset internal per-torrent state."""
+        if self.dry_run:
+            self.logger and self.logger.info("[DRY RUN] would pause/resume all torrents")
             return True
-        except Exception as e:
-            if self.logger:
-                self.logger.error(f"Torrent refresh error: {e}")
-            return False
+        self.api_client.pause_torrent("all")
+        time.sleep(min(10, self.drain_timeout))
+        return self.api_client.resume_torrent("all")
 
     def _restart_process(self) -> bool:
-        """Gracefully restart qBittorrent process."""
-        try:
-            if self.logger:
-                self.logger.warning("Restarting qBittorrent process")
+        """Last resort: gracefully drain torrents, then restart the service."""
+        return self.restart(reason="recovery escalation")
 
-            # This would stop and start the qBittorrent process
-            # Implementation depends on how qBittorrent is running (systemd, docker, etc)
-            import subprocess
+    # ------------------------------------------------------------------ #
+    # Restart (also called directly by the watchdog)
+    # ------------------------------------------------------------------ #
+    def restart(self, reason: str = "") -> bool:
+        """Gracefully drain torrents and restart qbittorrent-nox.
 
-            # Example: systemctl restart
-            result = subprocess.run(
-                ["systemctl", "restart", "qbittorrent-nox"],
-                capture_output=True,
-                timeout=30,
+        Args:
+            reason: Human-readable reason (logged + notified).
+
+        Returns:
+            True if the restart command succeeded (or dry-run).
+        """
+        msg = f"Restarting {self.service_name}" + (f" ({reason})" if reason else "")
+        if self.logger:
+            self.logger.warning(("[DRY RUN] " if self.dry_run else "") + msg)
+        self._notify("CRITICAL", "qBittorrent restart", msg)
+
+        if self.dry_run:
+            self.logger and self.logger.info(
+                f"[DRY RUN] would drain {self.drain_timeout}s then 'systemctl restart {self.service_name}'"
             )
+            return True
 
-            if result.returncode == 0:
-                if self.logger:
-                    self.logger.info("qBittorrent restarted successfully")
-                return True
-            else:
-                if self.logger:
-                    self.logger.error(f"Restart failed: {result.stderr.decode()}")
-                return False
-
+        # Graceful drain: pause torrents and let active pieces flush (5g).
+        try:
+            if self.api_client.is_reachable():
+                self.api_client.pause_torrent("all")
+                time.sleep(self.drain_timeout)
         except Exception as e:
-            if self.logger:
-                self.logger.error(f"Process restart error: {e}")
+            self.logger and self.logger.debug(f"Drain skipped: {e}")
+
+        try:
+            result = subprocess.run(
+                ["systemctl", "restart", self.service_name],
+                capture_output=True,
+                timeout=60,
+            )
+            if result.returncode == 0:
+                self.logger and self.logger.info(f"{self.service_name} restarted")
+                return True
+            self.logger and self.logger.error(
+                f"Restart failed: {result.stderr.decode(errors='replace').strip()}"
+            )
             return False
+        except Exception as e:
+            self.logger and self.logger.error(f"Restart error: {e}")
+            return False
+
+    def _notify(self, level: str, title: str, message: str):
+        if not self.notifier:
+            return
+        try:
+            from agent_logging.notification_system import NotificationLevel
+
+            self.notifier.send_notification(
+                getattr(NotificationLevel, level, NotificationLevel.WARNING),
+                title,
+                message,
+                tags=["recovery"],
+            )
+        except Exception as e:
+            self.logger and self.logger.debug(f"Notify failed: {e}")

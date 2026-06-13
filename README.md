@@ -1,230 +1,142 @@
 # qBittorrent Intelligent Recovery Agent
 
-Intelligent monitoring and recovery daemon for qBittorrent-nox. Detects when qBittorrent is lagged or degraded and automatically applies recovery strategies while preserving user configurations.
+A monitoring and self-healing daemon for **qbittorrent-nox**. It detects when
+qBittorrent has crashed, hit a storage problem, or degraded into lag, and
+applies recovery automatically — while preserving your existing configuration.
+qBittorrent keeps running "as if you ran it yourself."
 
-## Features
+## What it does
 
-### 🎯 Multi-Factor Lag Detection
-- **Performance Metrics** - Download/upload speeds, peer count, DHT nodes
-- **System Health** - CPU usage, memory pressure, disk I/O
-- **Configuration Analysis** - Validates qBittorrent settings
-- **Log Analysis** - Detects errors and connection issues
-- **Trend Analysis** - Rolling 5-minute window for performance degradation
+### Reliability & self-healing
+- **Crash watchdog** — if the `qbittorrent-nox` process dies or its Web API stops
+  responding, the agent restarts it (via `systemctl`), with a restart cap and
+  cooldown so it never loops. Hitting the cap raises a CRITICAL alert instead.
+- **Disk / mount safety** — guards your save paths. If a disk fills up or a mount
+  disappears (e.g. a slow-to-mount NAS), it pauses torrents *before* they error
+  and resumes them automatically once storage recovers.
+- **API resilience** — retries with backoff and re-authenticates on an expired
+  session, so a transient hiccup isn't mistaken for "healthy."
+- **Wait-for-mount gate** — on startup, optionally wait until watched mounts are
+  present and writable before doing anything.
 
-### 🔧 Intelligent Recovery Strategies (In Order)
-1. **Connection Cleanup** - Clear stale peer/connection data
-2. **DHT Refresh** - Trigger full DHT node rescan
-3. **Reload Config** - Reload configuration from disk
-4. **Dynamic Limits** - Adjust connection/bandwidth limits
-5. **Torrent Refresh** - Pause and resume torrents to reset state
-6. **Restart Process** - Graceful restart (last resort)
+### Detection (multi-factor lag score, 0–100)
+Performance (speeds, peers, DHT), system health (CPU, memory), configuration,
+**qBittorrent log parsing** (I/O errors, "too many open files", tracker errors),
+and a rolling **trend analysis**. A **predictive analyzer** warns before lag
+fully sets in.
 
-### ⚙️ Advanced Features
-- Rule-based decision making (not AI)
-- Balanced lag detection (configurable: aggressive/balanced/conservative)
-- User-specified config paths (preserves defaults)
-- Detailed logging with decision tracking
-- Dry-run mode for testing
-- **Notifications** - Email, webhook, and syslog alerts
-- **Auto-Tuning** - System-aware configuration recommendations
-- **State Snapshots** - Backup and restore recovery state
-- **Completion Prediction** - ETA calculations and speed analysis
-- **A/B Testing** - Optimize recovery strategies over time
-- **Docker Support** - Run agent in containers with Prometheus export
-- **Multi-Server** - Manage multiple qBittorrent instances
-- **Per-Category Rules** - Different strategies by torrent category
+### Recovery (escalating, least-invasive first)
+1. **Connection cleanup** — force tracker re-announce to refresh peers
+2. **DHT refresh** — toggle DHT off/on to re-bootstrap
+3. **Reload config**
+4. **Dynamic limits** — retune connection/bandwidth limits to system capacity
+5. **Torrent refresh** — pause/resume to reset per-torrent state
+6. **Restart** — graceful drain, then `systemctl restart` (last resort)
+
+### Visibility & alerting
+- **Status server** (stdlib HTTP): `/health` (for systemd/Docker healthchecks),
+  `/status` (JSON snapshot), `/metrics` (Prometheus).
+- **SQLite history** of samples and events.
+- **Notifications** via webhook, syslog, or email.
+
+### Maintenance / throttled hours
+Define a maintenance window (e.g. `22:00-06:00`). During it the agent pauses
+downloads and stops actively recovering; **when the window ends it resumes
+downloading automatically.** A manual `--maintenance` mode is also available.
+
+### Ports
+Optionally randomize the **BitTorrent listen port** (and outgoing port range) to
+evade port-based ISP throttling — at every startup, on a timer, once, or on
+detected throttling. Reachability is verified after each change. **The WebUI/API
+port is never randomized.**
+
+### Other checks
+Tracker health (all-trackers-down / "unregistered"), hash-fail / corruption
+watch, optional auto-pause of confirmed-dead torrents, and a WebUI security
+warning (default credentials, public bind, auth bypass).
 
 ## Installation
 
-### Prerequisites
-- Python 3.8+
-- qBittorrent-nox with Web API enabled (port 8080)
-- Access to qBittorrent config file
+```bash
+git clone <your-repo-url> qbittorrent-agent
+cd qbittorrent-agent
+pip install -r requirements.txt    # requests + psutil (everything else is stdlib)
+```
 
-### Quick Install
+Requires Python 3.8+ and qbittorrent-nox with the Web API enabled.
+
+## Configuration
+
+The agent keeps its **own config file next to `qBittorrent.conf`**
+(`~/.config/qBittorrent/qbittorrent-agent.conf` by default). It is generated on
+first run. **Any value you pass on the command line is written back and
+remembered**, so you only need a flag once.
+
+Precedence: CLI flag (this run) → saved config file → built-in default.
+
+Edit it interactively with the built-in text GUI:
 
 ```bash
-# Clone repository
-git clone https://github.com/Crashcart/qbittorrent-monitor.sh.git
-cd qbittorrent-monitor.sh
-
-# Install Python dependencies
-pip install -r requirements.txt
+./qbittorrent_agent.py --configure
 ```
 
-### Configuration Path
-
-The agent automatically looks for your qBittorrent config at the **standard default location**:
-
-```
-~/.config/qBittorrent/qBittorrent.conf
-```
-
-If your config is in this standard location, you can start the agent immediately with:
+Or set values via flags (which persist):
 
 ```bash
-./qbittorrent_agent.py
-```
-
-**Custom locations:** If your config is elsewhere, specify it explicitly:
-
-```bash
-./qbittorrent_agent.py --qbt-config /mnt/nas/qbittorrent/qBittorrent.conf
-./qbittorrent_agent.py --qbt-config /home/user/.config/qBittorrent/qBittorrent.conf
-```
-
-**Find your config:**
-
-```bash
-# Standard location
-cat ~/.config/qBittorrent/qBittorrent.conf
-
-# Search for it
-find ~ -name "qBittorrent.conf" 2>/dev/null
+./qbittorrent_agent.py --status-port 9000 --sensitivity aggressive
 ```
 
 ## Usage
 
-### Basic Usage
-
 ```bash
-# Basic monitoring (uses default config at ~/.config/qBittorrent/qBittorrent.conf)
+# Default: reads ~/.config/qBittorrent/qBittorrent.conf, balanced sensitivity
 ./qbittorrent_agent.py
 
-# Aggressive monitoring (more sensitive to lag)
-./qbittorrent_agent.py --sensitivity aggressive
-
-# Conservative monitoring (only fix severe issues)
-./qbittorrent_agent.py --sensitivity conservative
-
-# Custom config location
+# Custom qBittorrent config location
 ./qbittorrent_agent.py --qbt-config /mnt/nas/qBittorrent/qBittorrent.conf
+
+# See exactly what it would do, changing nothing
+./qbittorrent_agent.py --dry-run --log-level DEBUG
+
+# Throttled hours: pause downloads 22:00–06:00, resume after
+./qbittorrent_agent.py --maintenance-window 22:00-06:00
+
+# Guard a NAS mount and randomize the listen port on each start
+./qbittorrent_agent.py --watch-mount /mnt/nas/downloads --random-port
+
+# Alerts to a webhook
+./qbittorrent_agent.py --notify-webhook https://hooks.example.com/xyz
 ```
 
-### Advanced Options
+### Key options
+
+| Flag | Meaning |
+|------|---------|
+| `--qbt-config PATH` | qBittorrent.conf path (default `~/.config/qBittorrent/qBittorrent.conf`) |
+| `--config PATH` | Agent config path (default: next to qBittorrent.conf) |
+| `--configure` | Open the text-GUI config screen and exit |
+| `--interval N` | Monitoring interval, seconds (default 60) |
+| `--sensitivity` | `aggressive` / `balanced` / `conservative` |
+| `--dry-run` | Log intended actions without making changes |
+| `--maintenance` / `--maintenance-window 22:00-06:00` | Manual / scheduled maintenance |
+| `--no-watchdog` / `--max-restarts N` / `--restart-cooldown S` | Crash watchdog |
+| `--watch-mount PATH` (repeatable) / `--min-free-gb N` / `--wait-for-mount` | Storage guard |
+| `--random-port` / `--random-port-mode` / `--random-port-range LOW-HIGH` | Port randomization |
+| `--status-port N` (0 disables) / `--status-bind ADDR` | Status server |
+| `--notify-webhook` / `--notify-syslog` / `--notify-email-*` | Alerts |
+| `--state-db PATH` (`none` disables) | SQLite history |
+
+Run `./qbittorrent_agent.py --help` for the complete list.
+
+## Status endpoints
 
 ```bash
-# Dry run - see what would happen without making changes
-./qbittorrent_agent.py --dry-run
-
-# Custom API port
-./qbittorrent_agent.py --qbt-port 8080
-
-# Custom monitoring interval (seconds)
-./qbittorrent_agent.py --interval 30
-
-# Verbose logging
-./qbittorrent_agent.py --log-level DEBUG
-
-# Custom log file
-./qbittorrent_agent.py --log-file /tmp/qb-agent.log
+curl http://127.0.0.1:8081/health     # 200 healthy / 503 unhealthy
+curl http://127.0.0.1:8081/status     # JSON snapshot
+curl http://127.0.0.1:8081/metrics    # Prometheus text
 ```
 
-### Command-Line Options
-
-```
---qbt-config PATH           Path to qBittorrent config file (default: ~/.config/qBittorrent/qBittorrent.conf)
---qbt-port PORT             Web API port (default: 8080)
---qbt-username USER         Web API username (if auth required)
---qbt-password PASS         Web API password (if auth required)
---interval SECONDS          Monitoring interval in seconds (default: 60)
---sensitivity LEVEL         Lag detection sensitivity: aggressive/balanced/conservative (default: balanced)
---log-level LEVEL           Logging level: DEBUG/INFO/WARNING/ERROR (default: INFO)
---log-file PATH             Log file path (default: /var/log/qbittorrent-agent.log)
---dry-run                   Show what would be done without making changes
---daemon                    Run as background daemon
---help                      Show help message
-```
-
-## How It Works
-
-### Lag Detection
-
-The agent monitors qBittorrent health through multiple dimensions:
-
-1. **Performance (0-30 points)**
-   - Speed drops below baseline by configured threshold
-   - Peer count falls below minimum
-   - DHT nodes degrade
-
-2. **System Health (0-25 points)**
-   - CPU usage exceeds threshold
-   - Memory pressure too high
-   - Disk I/O bottlenecks
-
-3. **Configuration (0-15 points)**
-   - Invalid listening port
-   - Missing or corrupt settings
-
-4. **Log Analysis (0-20 points)**
-   - Connection errors
-   - Timeout patterns
-   - Resource exhaustion warnings
-
-5. **Trend Analysis (0-10 points)**
-   - Performance degrading over time
-   - Sustained low speeds
-   - Connection instability
-
-**Lag Score Interpretation:**
-- **0-20**: Normal operation
-- **20-40**: Minor lag, monitor
-- **40-60**: Moderate lag, cleanup/DHT refresh
-- **60-75**: Significant lag, config reload + torrent refresh
-- **75-85**: Severe lag, dynamic limits adjustment
-- **85+**: Critical lag, process restart
-
-### Recovery Execution
-
-When lag is detected, the agent executes recovery strategies in order, least to most invasive:
-
-1. **Connection Cleanup** (15s) - Minimal disruption
-2. **DHT Refresh** (10s) - Rescan DHT network
-3. **Config Reload** (10s) - Reload settings from disk
-4. **Dynamic Limits** (20s) - Adjust bandwidth/connections
-5. **Torrent Refresh** (30s) - Pause and resume torrents
-6. **Restart** (60s) - Graceful restart of qBittorrent
-
-Each strategy waits for effect before next action. Stops if lag resolves.
-
-## Configuration Examples
-
-### Default Setup (Standard User)
-
-```bash
-# Uses default config location: ~/.config/qBittorrent/qBittorrent.conf
-./qbittorrent_agent.py
-```
-
-### Standard NAS Setup
-
-```bash
-./qbittorrent_agent.py \
-  --qbt-config /mnt/nas/qbittorrent/qBittorrent.conf \
-  --interval 30 \
-  --sensitivity balanced
-```
-
-### High-Performance Aggressive Monitoring
-
-```bash
-./qbittorrent_agent.py \
-  --interval 10 \
-  --sensitivity aggressive \
-  --log-level DEBUG
-```
-
-### Conservative (Production)
-
-```bash
-./qbittorrent_agent.py \
-  --interval 120 \
-  --sensitivity conservative
-```
-
-## Systemd Service (Optional)
-
-Create `/etc/systemd/system/qbittorrent-agent.service`:
+## systemd service
 
 ```ini
 [Unit]
@@ -235,10 +147,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=debian-qbittorrent
-WorkingDirectory=/opt/qbittorrent-agent
-ExecStart=/opt/qbittorrent-agent/qbittorrent_agent.py \
-  --interval 60 \
-  --sensitivity balanced
+ExecStart=/opt/qbittorrent-agent/qbittorrent_agent.py --interval 60 --sensitivity balanced
 Restart=on-failure
 RestartSec=10
 
@@ -246,306 +155,61 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-Or with custom config path:
-
-```ini
-ExecStart=/opt/qbittorrent-agent/qbittorrent_agent.py \
-  --qbt-config /mnt/nas/qBittorrent/qBittorrent.conf \
-  --interval 60 \
-  --sensitivity balanced
-```
-
-Enable and start:
-
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable qbittorrent-agent
-sudo systemctl start qbittorrent-agent
-sudo systemctl status qbittorrent-agent
+sudo systemctl daemon-reload && sudo systemctl enable --now qbittorrent-agent
 ```
-
-## Logging
-
-Logs are written to `/var/log/qbittorrent-agent.log` by default (configurable).
-
-### View logs
-
-```bash
-# Real-time logs
-tail -f /var/log/qbittorrent-agent.log
-
-# Recent logs
-tail -50 /var/log/qbittorrent-agent.log
-
-# Filter by level
-grep ERROR /var/log/qbittorrent-agent.log
-grep WARN /var/log/qbittorrent-agent.log
-```
-
-### Log Levels
-
-- `DEBUG` - Detailed diagnostic information
-- `INFO` - General informational messages
-- `WARNING` - Warning messages (lag detected, recovery applied)
-- `ERROR` - Error messages (failures, exceptions)
-
-## Troubleshooting
-
-### Agent won't start
-
-```bash
-# Check Python 3.8+
-python3 --version
-
-# Check dependencies
-pip install -r requirements.txt
-
-# Test script syntax
-python3 -m py_compile qbittorrent_agent.py
-```
-
-### Can't connect to qBittorrent API
-
-```bash
-# Check qBittorrent is running
-ps aux | grep qbittorrent-nox
-
-# Check API is enabled (in qBittorrent settings)
-# Options → WebUI → Web User Interface (Remote)
-
-# Test API connectivity
-curl http://127.0.0.1:8080/api/v2/app/webapiVersion
-
-# Try custom port if not default
-./qbittorrent_agent.py --qbt-config ... --qbt-port 8080
-```
-
-### Config file not found
-
-The agent defaults to `~/.config/qBittorrent/qBittorrent.conf`. If that doesn't work:
-
-```bash
-# Find your qBittorrent config
-find ~ -name "qBittorrent.conf" 2>/dev/null
-
-# Check standard location
-cat ~/.config/qBittorrent/qBittorrent.conf
-
-# Use custom path
-./qbittorrent_agent.py --qbt-config /path/to/your/qBittorrent.conf
-```
-
-**Common locations:**
-- `~/.config/qBittorrent/qBittorrent.conf` (default, standard Linux)
-- `/mnt/nas/qbittorrent/qBittorrent.conf` (NAS setups)
-- `/home/debian-qbittorrent/.config/qBittorrent/qBittorrent.conf` (systemd service user)
 
 ## Architecture
 
 ```
-qbittorrent_agent.py              Main entry point & CLI
-├── detectors/
-│   ├── lag_detector.py           Multi-factor lag detection
-│   ├── torrent_health.py         Health scoring system
-│   ├── predictive_analyzer.py    Trend-based predictions
-│   └── completion_predictor.py   ETA calculations
-├── recovery/
-│   ├── recovery_engine.py        Recovery strategy execution
-│   ├── bandwidth_optimizer.py    Dynamic bandwidth tuning
-│   ├── connection_optimizer.py   Connection limit optimization
-│   ├── category_rules.py         Per-category recovery rules
-│   ├── config_auto_tuner.py      System-aware recommendations
-│   ├── multi_server_manager.py   Multi-instance support
-│   └── backup_restore.py         State snapshots
-├── qbt_api/
-│   ├── api_client.py             Web API client
-│   └── config_manager.py         Config file handling
-├── monitoring/
-│   ├── metrics.py                System metrics collection
-│   └── prometheus_exporter.py    Prometheus metrics export
-├── logging/
-│   ├── agent_logger.py           Logging configuration
-│   └── notification_system.py    Multi-channel notifications
-├── integration/
-│   └── docker_integration.py     Docker container support
-├── optimization/
-│   └── ab_testing_framework.py   Strategy optimization
-└── tests/
-    └── test_integration.py       Integration tests
+qbittorrent_agent.py          Entry point, CLI, monitor loop
+qbt_api/
+  agent_config.py             Self-generating, persisted INI config
+  api_client.py               Web API client (retry, re-auth, reachability)
+  config_manager.py           Reads qBittorrent.conf
+detectors/
+  lag_detector.py             Multi-factor lag score (incl. log parsing)
+  predictive_analyzer.py      Early-warning trend analysis
+  torrent_health.py           Per-torrent health scoring
+recovery/
+  recovery_engine.py          Escalating real recovery strategies + restart
+  bandwidth_optimizer.py      Dynamic bandwidth limits
+  connection_optimizer.py     Dynamic connection limits
+  backup_restore.py           State snapshots + conf backups
+monitoring/
+  process_watchdog.py         Crash detection
+  storage_monitor.py          Disk/mount safety + wait-for-mount
+  maintenance.py              Scheduled/manual maintenance (pause/resume)
+  scheduler.py                Maintenance-window time logic
+  port_manager.py             Random listen/outgoing ports + verification
+  health_checks.py            Tracker health, hash-fail, WebUI security
+  status_server.py            /health, /status, /metrics + AgentState
+  history_store.py            SQLite samples/events
+  metrics.py                  System metrics (psutil)
+  prometheus_exporter.py      Prometheus formatting
+agent_logging/
+  agent_logger.py             Rotating logger
+  notification_system.py      Email / webhook / syslog
+tui/
+  config_tui.py               Curses configuration screen
 ```
 
-## Requirements
+## Safety
 
-- Python 3.8+
-- requests (HTTP client for webhooks and API)
-- psutil (system metrics)
-- configparser (config parsing)
-- python-daemon (daemon mode)
+- `--dry-run` gates every mutating action (restart, pause/resume, preference changes).
+- The agent backs up `qBittorrent.conf` before applying preference changes.
+- It never randomizes or changes the WebUI/API port.
+- The config file is written `chmod 600` (it can hold credentials); use
+  `--no-save-secrets` to keep passwords out of the file.
 
-See `requirements.txt` for versions.
-
-## Advanced Features
-
-### 📬 Notifications
-
-Configure alerts through multiple channels:
+## Testing
 
 ```bash
-# Email notifications
-./qbittorrent_agent.py --qbt-config ... \
-  --notify-email-smtp smtp.gmail.com \
-  --notify-email-port 587 \
-  --notify-email-from user@gmail.com \
-  --notify-email-password APP_PASSWORD \
-  --notify-email-to admin@example.com
-
-# Webhook notifications
-./qbittorrent_agent.py --qbt-config ... \
-  --notify-webhook https://hooks.slack.com/services/YOUR/WEBHOOK
-
-# Syslog notifications
-./qbittorrent_agent.py --qbt-config ... \
-  --notify-syslog local0
+python3 -m unittest discover tests
 ```
 
-### 🎯 Completion Prediction
+## Future work (not yet implemented)
 
-The agent predicts torrent completion times:
-
-```bash
-# View predictions in real-time
-tail -f /var/log/qbittorrent-agent.log | grep "ETA"
-```
-
-Predictions improve over time as the agent collects speed history.
-
-### ⚙️ Auto-Configuration Tuning
-
-Let the agent suggest optimal settings based on your system:
-
-```bash
-# Get recommendations (dry-run only)
-./qbittorrent_agent.py --qbt-config ... --suggest-config
-```
-
-Suggestions include:
-- Connection limits based on available memory
-- Bandwidth limits based on CPU cores
-- Cache size based on RAM
-- Piece size for disk I/O optimization
-- Active torrent count recommendations
-
-### 📊 A/B Testing
-
-Compare recovery strategies:
-
-```bash
-# Enable A/B testing
-./qbittorrent_agent.py --qbt-config ... --enable-ab-testing
-
-# View results
-curl http://localhost:8081/ab-testing/results
-```
-
-### 🐳 Docker Deployment
-
-Run the agent in a container:
-
-```bash
-# Build image
-docker build -t qbittorrent-agent .
-
-# Run container
-docker run -d \
-  --name qb-agent \
-  --network host \
-  -e QBT_HOST=localhost \
-  -e QBT_PORT=8080 \
-  qbittorrent-agent
-
-# Or use docker-compose
-docker-compose up -d
-```
-
-### 💾 State Backup & Restore
-
-Automatic snapshots of recovery state:
-
-```bash
-# Snapshots saved to /var/lib/qbittorrent-agent/backups/
-# Each contains: lag_score, applied_limits, system_metrics, recovery_attempts
-
-# View snapshots
-ls -la /var/lib/qbittorrent-agent/backups/
-
-# Restore from snapshot (manual)
-python3 -c "
-from recovery.backup_restore import BackupRestoreManager
-mgr = BackupRestoreManager()
-snapshot = mgr.load_snapshot_from_file('backups/20240101_120000.json')
-print(f'Lag score: {snapshot.lag_score}')
-"
-```
-
-### 📈 Prometheus Metrics
-
-Export metrics for monitoring and visualization:
-
-```bash
-# Enable Prometheus export
-./qbittorrent_agent.py --qbt-config ... --enable-prometheus --prometheus-port 8081
-
-# Scrape metrics
-curl http://localhost:8081/metrics
-
-# Configure Prometheus (prometheus.yml)
-scrape_configs:
-  - job_name: 'qbittorrent-agent'
-    static_configs:
-      - targets: ['localhost:8081']
-    scrape_interval: 30s
-
-# View in Grafana
-# Import the generated dashboard template for instant visualization
-```
-
-Exported metrics include:
-- qBittorrent speeds, peer counts, DHT nodes
-- Lag score and detection status
-- Applied connection/bandwidth limits
-- System CPU, memory, disk usage
-- Recovery attempt counts
-- Notification history
-
-## Security
-
-- ✓ No external API calls (self-contained)
-- ✓ No elevated privileges required
-- ✓ Respects user configurations
-- ✓ Graceful error handling
-- ✓ Detailed audit logging
-- ✓ Dry-run mode for testing
-- ✓ Credentials stored securely (not in configs)
-- ✓ Optional TLS for webhook/SMTP
-
-## Contributing
-
-Pull requests welcome! Areas for enhancement:
-
-- Additional lag detection metrics
-- More recovery strategies
-- Better API error handling
-- Test coverage
-- Docker container support
-
-## License
-
-MIT License
-
-## Support
-
-For issues:
-1. Check logs: `tail -f /var/log/qbittorrent-agent.log`
-2. Run with verbose logging: `--log-level DEBUG`
-3. Test in dry-run mode: `--dry-run`
-4. File an issue with logs and config details (masked IPs)
+VPN-interface kill-switch, outbound IP-leak check, disk-aware pre-emptive
+throttling, Discord/Telegram/ntfy notifiers, and force-encryption anti-throttle
+tuning.

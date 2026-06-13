@@ -1,4 +1,4 @@
-requests==2.31.0
-configparser==6.0.0
-psutil==5.9.6
-python-daemon==3.0.1
+# Runtime dependencies. Everything else (configparser, sqlite3, http.server,
+# curses, smtplib) ships with the Python 3.8+ standard library.
+requests>=2.31.0
+psutil>=5.9.0

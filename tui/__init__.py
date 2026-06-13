@@ -1,0 +1,1 @@
+"""Text-GUI configuration package."""

@@ -84,9 +84,43 @@ class BackupRestoreManager:
         self.backup_dir = backup_dir
         self.snapshots: List[StateSnapshot] = []
         self.max_snapshots = 50
+        self._last_conf_backup = 0.0
 
         # Create backup directory if needed
         os.makedirs(backup_dir, exist_ok=True)
+
+    def backup_file(self, path: str, min_interval: float = 3600.0) -> str:
+        """Copy a file (e.g. qBittorrent.conf) into the backups dir (5f).
+
+        Rate-limited by ``min_interval`` so repeated changes don't spam backups.
+
+        Args:
+            path: File to back up.
+            min_interval: Minimum seconds between backups of the same kind.
+
+        Returns:
+            Path to the backup copy, or "" if skipped/failed.
+        """
+        import shutil
+        import time
+
+        now = time.time()
+        if self._last_conf_backup and (now - self._last_conf_backup) < min_interval:
+            return ""
+        if not os.path.exists(path):
+            return ""
+        try:
+            stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            dest = os.path.join(self.backup_dir, f"{os.path.basename(path)}.{stamp}.bak")
+            shutil.copy2(path, dest)
+            self._last_conf_backup = now
+            if self.logger:
+                self.logger.info(f"Backed up {path} -> {dest}")
+            return dest
+        except OSError as e:
+            if self.logger:
+                self.logger.error(f"Config backup failed: {e}")
+            return ""
 
     def create_snapshot(
         self,

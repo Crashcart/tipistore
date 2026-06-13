@@ -1,28 +1,52 @@
 """Lag detection analysis for qBittorrent."""
 
+import os
 import time
+from pathlib import Path
 from typing import Tuple, Dict, Any
 from collections import deque
 
 from monitoring.metrics import SystemMetrics
 
 
+# Default qBittorrent log location (qbittorrent-nox on Linux).
+DEFAULT_QBT_LOG = "~/.local/share/qBittorrent/logs/qbittorrent.log"
+
+# Substrings that indicate trouble worth scoring.
+LOG_ERROR_PATTERNS = (
+    "i/o error",
+    "too many open files",
+    "no space left",
+    "permission denied",
+    "read-only file system",
+    "fastresume",
+    "unreachable",
+    "timed out",
+    "connection refused",
+)
+
+
 class LagDetector:
     """Detects qBittorrent lag through multi-factor analysis."""
 
-    def __init__(self, api_client, config_manager, sensitivity="balanced", logger=None):
+    def __init__(self, api_client, config_manager, sensitivity="balanced",
+                 qbt_log: str = "", logger=None):
         """Initialize lag detector.
 
         Args:
             api_client: QBittorrent API client
             config_manager: Configuration manager
             sensitivity: Detection sensitivity ('aggressive', 'balanced', 'conservative')
+            qbt_log: Path to qBittorrent log ('' = auto-detect default location)
             logger: Logger instance
         """
         self.api_client = api_client
         self.config_manager = config_manager
         self.sensitivity = sensitivity
         self.logger = logger
+
+        self.qbt_log = str(Path(qbt_log).expanduser()) if qbt_log else str(Path(DEFAULT_QBT_LOG).expanduser())
+        self._log_pos = 0  # byte offset for incremental reads
 
         # Thresholds based on sensitivity
         self.thresholds = self._get_thresholds(sensitivity)
@@ -138,8 +162,8 @@ class LagDetector:
                 score += min(15, speed_drop / 5)
                 issues.append(f"Speed drop: {speed_drop:.0f}%")
 
-            # Check peer count
-            peer_count = stats.get("peers", 0)
+            # Check peer count (server_state uses total_peer_connections)
+            peer_count = stats.get("total_peer_connections", stats.get("peers", 0))
             if peer_count < self.thresholds["connection_count_min"]:
                 score += 10
                 issues.append(f"Low peer count: {peer_count}")
@@ -199,16 +223,11 @@ class LagDetector:
         issues = []
 
         try:
-            config = self.config_manager.get_config()
-
-            # Check for common issues
-            if config.get("network", {}).get("port", 0) <= 0:
+            network = self.config_manager.get_network_config()
+            # Only penalize a clearly invalid configured port.
+            if network.get("port", 6881) <= 0:
                 score += 5
                 issues.append("Invalid listening port")
-
-            if config.get("network", {}).get("upnp", False) is False:
-                # UPnP disabled might cause connectivity issues
-                pass  # Not an error, just informational
 
         except Exception as e:
             if self.logger:
@@ -226,11 +245,34 @@ class LagDetector:
         issues = []
 
         try:
-            # This would parse qBittorrent logs
-            # For now, placeholder implementation
-            pass
+            if not os.path.exists(self.qbt_log):
+                return 0.0, []
 
-        except Exception as e:
+            size = os.path.getsize(self.qbt_log)
+            # Handle log rotation/truncation: reset offset if the file shrank.
+            if size < self._log_pos:
+                self._log_pos = 0
+
+            with open(self.qbt_log, "r", errors="replace") as f:
+                f.seek(self._log_pos)
+                new_lines = f.readlines()
+                self._log_pos = f.tell()
+
+            counts: Dict[str, int] = {}
+            for line in new_lines:
+                low = line.lower()
+                for pattern in LOG_ERROR_PATTERNS:
+                    if pattern in low:
+                        counts[pattern] = counts.get(pattern, 0) + 1
+
+            if counts:
+                total = sum(counts.values())
+                # 4 points per distinct error type, capped at 20.
+                score = min(20.0, len(counts) * 4.0 + min(total, 10))
+                top = sorted(counts.items(), key=lambda kv: -kv[1])[:2]
+                issues.append("log errors: " + ", ".join(f"{p}x{c}" for p, c in top))
+
+        except OSError as e:
             if self.logger:
                 self.logger.debug(f"Log analysis error: {e}")
 
